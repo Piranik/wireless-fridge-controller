@@ -16,7 +16,7 @@
 
 #define MAXRUNTIME 1200 // 840 //14 minutes maximum runtime
 #define WARMUP 840 //14 minutes initial startup - avoids reverse pressure problems apparently
-#define COOLDOWN 840 //14 mins cooldown
+#define COOLDOWN 840 //14 mins cooldown - not used will remove soon
 #define UPDATE_FREQ 15000;
 
 //uint8_t fridge_address[8] = {0x10, 0xfa, 0x47, 0x35, 0x00, 0x00, 0x00, 0x37};
