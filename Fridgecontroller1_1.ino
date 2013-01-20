@@ -1,51 +1,65 @@
+/* 
 
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
 
-#include <OneWire.h>
-#include <DallasTemperature.h>
-#include <RF24Network.h>
-#include <RF24.h>
-#include <SPI.h>
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    
+    ------
+    
+    Note relay attached to pin 3 has HIGH as off and LOW as on
+    
+    
+*/
+
+#include <OneWire.h>            // Required for DS18B20
+#include <DallasTemperature.h>  // Required for DS18B20
+
+  
+#include <RF24.h>               // Required for RF24 Network
+#include <SPI.h>                // Required for RF24
+#include <RF24Network.h>        // Brilliant networking library for nordic 2.4ghz cheap as chips dongles
+
 
 // Temperature sensor and compressor setup
 #define ONEWIRE 7
-#define DISABLE 2
-#define COMPRESSOR 3
 
-#define FRIDGEHIGHTEMP 3.0
-#define FRIDGELOWTEMP 2.5
+#define DISABLE 2          // Not used, relic of previous code
+#define COMPRESSOR 3       // Compressor pin connected to mechanical relay
 
-#define MAXRUNTIME 1200 // 840 //14 minutes maximum runtime
-#define WARMUP 840 //14 minutes initial startup - avoids reverse pressure problems apparently
-#define COOLDOWN 840 //14 mins cooldown - not used will remove soon
+#define FRIDGEHIGHTEMP 3.0   // Statically assigned now, future updates will have variables set remotely
+#define FRIDGELOWTEMP 2.5    // Statically assigned now, future updates will have variables set remotely
+
+#define MAXRUNTIME 1200 // Define maximum runtime as 20 minutes, much longer than this and the fridge performance drops significantly
+#define WARMUP 840 //14 minutes initial startup - avoids reverse pressure problems called out on hackaday
+#define COOLDOWN 840 //14 mins cooldown - no reason for 14 minutes, may reduce 
+
 #define UPDATE_FREQ 15000;
-
-//uint8_t fridge_address[8] = {0x10, 0xfa, 0x47, 0x35, 0x00, 0x00, 0x00, 0x37};
-
-// 220L Kelvinator is 85 watts
-#define COMPRESSOR_WATTAGE 85.0
-
-// It is recommended to not turn the compressor on immediately after startup
-// because back pressure can damage the compressor
-//#define COMPRESSOR_STARTUP_DELAY 120
-#define COMPRESSOR_STARTUP_DELAY 0
 
 // How long between measurement cycles
 #define SLEEP_SEC 10
 
+//Now define radio
 
-//Now radio
-
-// nRF24L01(+) radio attached using Getting Started board 
+// nRF24L01(+) radio attached with standard pins (eg getting started board)
 RF24 radio(9,10);
 
 // Network uses that radio
 RF24Network network(radio);
 
 // Address of our node
-uint16_t this_node = 3;
+uint16_t this_node = 3; // node 3 is the fridge, node 0 is the root node
 
 // Address of the other node
-const uint16_t other_node = 1;
+const uint16_t root_node = 0;
 
 
 
@@ -57,12 +71,17 @@ int start_compressor = 1;
 uint8_t compressor = HIGH;
 
 
-
 void setup()   {                
-  // initialize the digital pin as an output:
+  // initialize the digital pins as an output:
   pinMode(COMPRESSOR, OUTPUT);
   pinMode(DISABLE, OUTPUT);
+  
+  // Ensure relay starts in OFF position so we can wait for 'warmup'
+  
   digitalWrite(COMPRESSOR, HIGH);
+  
+  // Start up the RF24network
+  
   SPI.begin();
   radio.begin();
   network.begin(/*channel*/ 90, /*node address*/ this_node);
@@ -70,20 +89,27 @@ void setup()   {
   
   
   Serial.begin(115200);
-  Serial.println("FridgeControlWeb");
+  Serial.println("Wireless-Fridge-Controller");
+  
+  // Initiate DS18B20
+  
   sensors.begin();
+  
+  
+ /* Useful for debugging - checks that we're getting temperature readings straight away
+ 
   sensors.requestTemperatures();
   float fridge = sensors.getTempCByIndex(0);
+  Serial.println(fridge);
   
- Serial.println(fridge);
-  
+  */
 }
 
-  int i, j, data_inset, delta;
-  char float_conv[10];
-  float t, fridge = 5.0, freezer = -20.0;
+  float fridge = 5.0; 
+  
   int run_counter = 0;
-  int cool_down = COOLDOWN;
+
+// Define structure for sending data to root node - root node receives and passes to PC for uploads to Cosm. 
 
     struct wd_payload_t
 {
@@ -104,18 +130,14 @@ void loop()
  
  if(millis()/1000 > WARMUP && start_compressor == 1)
  {
- // Serial.println("Warmup complete");
   start_compressor = 0;
  }  
-//  Serial.print("start compressor = ");
-//  Serial.print(start_compressor);
-//  Serial.print(" Fridge temp = ");
-//  Serial.println(fridge);
+
+// Will tidy up these sections later, I am sure there is a much more elegant way of doing this
 
 
 
-
- if(run_counter > MAXRUNTIME)
+ if(run_counter > MAXRUNTIME)  // If max run time hit, initiate a cool-down sequence.
  {
    start_compressor = 2;
    Serial.println("Run for 14 mins, time to cool down");
@@ -135,7 +157,7 @@ void loop()
  
  if(run_counter == 0 && millis()/1000 > WARMUP)
  {
-   Serial.println("Warmup complete or Hit inside runcounter zero statement");
+   Serial.println("Warmup complete and/or Hit inside runcounter zero statement");
    start_compressor = 0;
  }
 
@@ -173,10 +195,7 @@ void loop()
     }
     else
     {
-      //sprintf(data + data_inset, "Start delay remaining: %d\n",
-    //          start_compressor);
-     // data_inset = strlen(data);
-      //digitalWrite(DISABLE, HIGH);
+
     }
  
 
@@ -190,13 +209,15 @@ void loop()
    } 
     
     
-    delay (1000);
+    delay (1000);  // On the to-do list is to remove this and move to a more exact 'millis' based system. 
   }
+  
+  
+ 
+ // function to send update to root node
   
  void send_update(float temp, int state)
  {
- 
-  
  
   wd_payload_t wd_payload;
 
@@ -204,7 +225,7 @@ void loop()
  wd_payload.beer_fridge = temp;
  wd_payload.compressor_state = state;
  
-    RF24NetworkHeader wd_header(/*to node*/ 0);
+    RF24NetworkHeader wd_header(/*to node*/ root_node);
     bool ok = network.write(wd_header,&wd_payload,sizeof(wd_payload));
     if (ok)
       Serial.println("ok.");
